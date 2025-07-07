@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 from typing import Dict, List
 
-from ..state import ChatState
+from state import ChatState
 
 # ────────────────────────────────────────────────────────────────
 # スタブ用ダミーデータ（開発／CI 用）

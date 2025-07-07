@@ -9,20 +9,15 @@ from __future__ import annotations
 
 import sys
 
-from .graph import bot
-from .state import ChatState
+from graph import bot
+from state import ChatState
 
 
 def main() -> None:
-    """CLI エントリポイント。"""
-    if len(sys.argv) < 2:
-        print('使い方: python -m src.chatbot "丸ノ内線の遅延は？"')
-        sys.exit(1)
-
-    question = sys.argv[1]
+    question = "丸ノ内線の遅延は？"
     init_state: ChatState = {"query": question, "operator": None, "status": None}
     result = bot.invoke(init_state)
-    print(result["answer"])
+    print(result)
 
 
 if __name__ == "__main__":

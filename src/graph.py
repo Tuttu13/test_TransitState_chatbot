@@ -7,8 +7,8 @@ LangGraph の状態遷移グラフを構築し、`bot` として公開する。
 
 from langgraph.graph import StateGraph
 
-from .nodes import fetch_train_info, generate_answer, parse_user
-from .state import ChatState
+from nodes import fetch_train_info, generate_answer, parse_user
+from state import ChatState
 
 # ────────────────────────────────────────────────────────────────
 # グラフ構築
