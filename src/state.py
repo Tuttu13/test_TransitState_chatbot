@@ -1,15 +1,16 @@
-from typing import List, Optional
+"""
+state.py
+--------
 
-from pydantic import BaseModel
+チャットボット全体で共有するステート定義。
+"""
+
+from typing import Dict, Optional, TypedDict
 
 
-class Alert(BaseModel):
-    line: str
-    status: str  # "delay" / "suspended" / "normal"
-    info: str  # 詳細テキスト
+class ChatState(TypedDict):
+    """LangGraph で扱うステート（一種のコンテキスト）"""
 
-
-class TransitState(BaseModel):
-    location: str  # ユーザー入力の地名
-    nearest_station: Optional[str]  # 例: "大阪駅"
-    alerts: List[Alert] = []  # 運行情報リスト
+    query: str  # ユーザーの質問そのもの
+    operator: Optional[str]  # ODPT operator ID（例: "odpt.Operator:TokyoMetro"）
+    status: Optional[Dict]  # ODPT から取得した JSON 1 レコード

@@ -1,16 +1,29 @@
-from graph import app
-from state import TransitState
+"""
+chatbot.py
+----------
+
+簡易 CLI。入力を読み取り、回答を標準出力する。
+"""
+
+from __future__ import annotations
+
+import sys
+
+from .graph import bot
+from .state import ChatState
 
 
-def run_chat(message: str) -> str:
-    init = TransitState(location=message)
-    final = app.invoke(init)
-    return getattr(final, "response_text", "情報を取得できませんでした。")
+def main() -> None:
+    """CLI エントリポイント。"""
+    if len(sys.argv) < 2:
+        print('使い方: python -m src.chatbot "丸ノ内線の遅延は？"')
+        sys.exit(1)
+
+    question = sys.argv[1]
+    init_state: ChatState = {"query": question, "operator": None, "status": None}
+    result = bot.invoke(init_state)
+    print(result["answer"])
 
 
 if __name__ == "__main__":
-    while True:
-        user = input("地名を入力してください（例: 大阪）> ").strip()
-        if user.lower() in {"exit", "quit"}:
-            break
-        print(run_chat(user), "\n")
+    main()

@@ -1,19 +1,28 @@
+"""
+graph.py
+--------
+
+LangGraph の状態遷移グラフを構築し、`bot` として公開する。
+"""
+
 from langgraph.graph import StateGraph
 
-from nodes.transit import (
-    fetch_transit_alerts,
-    geocode_and_find_station,
-    render_response,
-)
-from state import TransitState
+from .nodes import fetch_train_info, generate_answer, parse_user
+from .state import ChatState
 
-g = StateGraph(TransitState)
-g.add_node("geo", geocode_and_find_station)
-g.add_node("alerts", fetch_transit_alerts)
-g.add_node("render", render_response)
+# ────────────────────────────────────────────────────────────────
+# グラフ構築
+# ────────────────────────────────────────────────────────────────
+_builder = StateGraph(ChatState)
 
-g.set_entry_point("geo")
-g.add_edge("geo", "alerts")
-g.add_edge("alerts", "render")
+_builder.add_node("parse_user", parse_user)
+_builder.add_node("fetch", fetch_train_info)
+_builder.add_node("answer", generate_answer)
 
-app = g.compile()
+_builder.add_edge("parse_user", "fetch")
+_builder.add_edge("fetch", "answer")
+
+_builder.set_entry_point("parse_user")
+_builder.set_finish_point("answer")
+
+bot = _builder.compile()

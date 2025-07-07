@@ -1,77 +1,101 @@
+"""
+transit.py
+----------
+
+ODPT（鉄道運行情報）に関するノード群。
+`USE_STUB=true` でスタブデータを、`false` で実 API を利用。
+"""
+
 from __future__ import annotations
 
-import logging
 import os
+from typing import Dict, List
 
-import requests
-from langgraph.graph import StateGraph
+from ..state import ChatState
 
-from state import Alert, TransitState
+# ────────────────────────────────────────────────────────────────
+# スタブ用ダミーデータ（開発／CI 用）
+# ────────────────────────────────────────────────────────────────
+STUB_DATA: List[Dict] = [
+    {
+        "dc:date": "2025-07-07T09:05:00+09:00",
+        "odpt:operator": "odpt.Operator:TokyoMetro",
+        "odpt:railway": "odpt.Railway:TokyoMetro.Marunouchi",
+        "odpt:trainInformationStatus": "遅延",
+        "odpt:trainInformationText": "丸ノ内線は安全確認のため全線で 10 分ほど遅延しています。",
+    },
+    {
+        "dc:date": "2025-07-07T09:02:00+09:00",
+        "odpt:operator": "odpt.Operator:Toei",
+        "odpt:railway": "odpt.Railway:Toei.Asakusa",
+        "odpt:trainInformationStatus": "平常運転",
+        "odpt:trainInformationText": "都営浅草線は平常どおり運転しています。",
+    },
+]
 
-MOCK = os.getenv("MOCK_API", "1") == "1"
-YAHOO_KEY = os.getenv("YAHOO_API_KEY")  # ← 実運用は取得
+USE_STUB: bool = os.getenv("USE_STUB", "true").lower() == "true"
+ODPT_TOKEN: str | None = os.getenv("ODPT_TOKEN")
 
 
-# ---------------- ① ジオコーディング & 最寄り駅推定 ----------------
-def geocode_and_find_station(state: TransitState) -> TransitState:
-    if MOCK or not YAHOO_KEY:
-        # とりあえず地名 + "駅" を雑に返す
-        state.nearest_station = f"{state.location}駅"
-        return state
-
-    # 例: ジオコーダで緯度経度取得→駅検索 API
-    # lat, lng = ...
-    # station = ...
-    state.nearest_station = station
+# ────────────────────────────────────────────────────────────────
+# ノード 1: ユーザー入力の解析
+# ────────────────────────────────────────────────────────────────
+def parse_user(state: ChatState) -> ChatState:
+    """
+    路線キーワードから operator ID を推定し、state['operator'] に格納する。
+    """
+    mapping = {
+        "丸ノ内": "odpt.Operator:TokyoMetro",
+        "メトロ": "odpt.Operator:TokyoMetro",
+        "都営": "odpt.Operator:Toei",
+    }
+    for kw, op in mapping.items():
+        if kw in state["query"]:
+            state["operator"] = op
+            break
     return state
 
 
-# ---------------- ② 運行情報取得 ----------------
-def fetch_transit_alerts(state: TransitState) -> TransitState:
-    station = state.nearest_station or state.location
-    if MOCK or not YAHOO_KEY:
-        # ダミーデータ: ランダムで遅延/通常を返す
-        dummy = [
-            Alert(
-                line="JR大阪環状線",
-                status="delay",
-                info="人身事故の影響で15分前後の遅れ",
-            ),
-            Alert(line="Osaka Metro 御堂筋線", status="normal", info="平常運転"),
-        ]
-        state.alerts = dummy
+# ────────────────────────────────────────────────────────────────
+# ノード 2: ODPT から運行情報を取得（またはスタブ）
+# ────────────────────────────────────────────────────────────────
+def fetch_train_info(state: ChatState) -> ChatState:
+    """
+    operator が決まっていれば運行情報を取得し、state['status'] へ格納。
+    """
+    operator = state.get("operator")
+    if not operator:
         return state
 
-    # 実 API（例: https://transit.yahooapis.jp/traininfo）
-    try:
-        resp = requests.get(
-            "https://transit.yahooapis.jp/traininfo",
-            params={"appid": YAHOO_KEY, "name": station},
-            timeout=8,
+    if USE_STUB:
+        # スタブモード：メモリ内検索
+        state["status"] = next(
+            (rec for rec in STUB_DATA if rec["odpt:operator"] == operator), None
         )
-        resp.raise_for_status()
-        data = resp.json()  # ← 実際は XML なので適宜変換
-        state.alerts = [
-            Alert(line=item["Line"], status=item["Status"], info=item["Description"])
-            for item in data["Result"]["Train"]
-        ]
-    except Exception as e:
-        logging.warning("運行情報取得失敗: %s", e)
-        state.alerts = [Alert(line="情報取得エラー", status="unknown", info=str(e))]
+    else:
+        import requests
+
+        url = "https://api.odpt.org/api/v4/odpt:TrainInformation"
+        params = {"odpt:operator": operator, "acl:consumerKey": ODPT_TOKEN}
+        response = requests.get(url, params=params, timeout=8)
+        response.raise_for_status()
+        state["status"] = (response.json() or [None])[0]
+
     return state
 
 
-# ---------------- ③ レスポンス整形 ----------------
-def render_response(state: TransitState) -> TransitState:
-    if not state.alerts:
-        state.response_text = (
-            f"🚉 {state.location} 周辺の路線に遅延情報はありませんでした。"
-        )
-        return state
+# ────────────────────────────────────────────────────────────────
+# ノード 3: 応答生成（グラフの終点）
+# ────────────────────────────────────────────────────────────────
+def generate_answer(state: ChatState) -> Dict[str, str]:
+    """
+    state['status'] を人間向けメッセージに整形。
+    LangGraph の finish ノードなので辞書を返す。
+    """
+    status = state.get("status")
+    if not status:
+        return {"answer": "申し訳ありません、対象路線が特定できませんでした。"}
 
-    lines = [f"📍 **{state.nearest_station or state.location} 周辺の運行情報**"]
-    for a in state.alerts:
-        icon = "⚠️" if a.status != "normal" else "✅"
-        lines.append(f"{icon} **{a.line}** – {a.info}")
-    state.response_text = "\n".join(lines)
-    return state
+    stamp = status["dc:date"]
+    text = status["odpt:trainInformationText"]
+    return {"answer": f"【{stamp} 現在】{text}"}
